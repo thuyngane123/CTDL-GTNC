@@ -1,0 +1,230 @@
+import math
+import random
+import copy
+import matplotlib.pyplot as plt
+
+# =========================
+# NODE
+# =========================
+class Node:
+    def __init__(self, id, name, x, y, demand, ready, due):
+        self.id = id
+        self.name = name
+        self.x = x
+        self.y = y
+        self.demand = demand
+        self.ready_time = ready
+        self.due_time = due
+
+# =========================
+# DATA
+# =========================
+def create_random_rpdptw(n_pairs=6):
+    nodes = []
+    # Depot tại id 0
+    nodes.append(Node(0, "Depot", 50, 50, 0, 0, 2000))
+
+    pickup_delivery = {}
+    id_counter = 1
+    random.seed(42)
+
+    for i in range(n_pairs):
+        px, py = random.randint(0, 100), random.randint(0, 100)
+        demand = random.randint(5, 10)
+        ready_p = random.randint(0, 500)
+        due_p = ready_p + random.randint(100, 300)
+
+        p_id = id_counter
+        nodes.append(Node(p_id, f"P{i}", px, py, demand, ready_p, due_p))
+        id_counter += 1
+
+        # Delivery gần Pickup để dễ có lời giải
+        dx, dy = px + random.randint(-15, 15), py + random.randint(-15, 15)
+        ready_d = ready_p + 10 # Phải sau khi pickup
+        due_d = ready_d + random.randint(200, 500)
+
+        d_id = id_counter
+        nodes.append(Node(d_id, f"D{i}", dx, dy, -demand, ready_d, due_d))
+        id_counter += 1
+
+        pickup_delivery[p_id] = d_id
+
+    dist = [[math.hypot(a.x-b.x, a.y-b.y) for b in nodes] for a in nodes]
+    return nodes, dist, pickup_delivery
+
+# =========================
+# CHECK & COST
+# =========================
+def check_precedence(route, pd):
+    pos = {n: i for i, n in enumerate(route)}
+    for p, d in pd.items():
+        if p in pos and d in pos:
+            if pos[p] > pos[d]: return False
+    return True
+
+def check_capacity(route, nodes, cap=30):
+    load = 0
+    for n in route:
+        load += nodes[n].demand
+        if load > cap or load < 0: return False
+    return True
+
+def get_cost(route, dist, nodes, pd):
+    if not check_precedence(route, pd): return float('inf')
+    if not check_capacity(route, nodes): return float('inf')
+
+    cost, time = 0, 0
+    for i in range(len(route)-1):
+        u, v = route[i], route[i+1]
+        cost += dist[u][v]
+        time = max(time + dist[u][v], nodes[v].ready_time)
+        if time > nodes[v].due_time: return float('inf')
+    return cost
+
+# =========================
+# DESTROY METHODS
+# =========================
+def random_removal(routes, pd, q=2):
+    pairs = list(pd.items())
+    selected_pairs = random.sample(pairs, min(q, len(pairs)))
+    removed_nodes = []
+    for p, d in selected_pairs:
+        removed_nodes.extend([p, d])
+    
+    new_routes = []
+    for r in routes:
+        new_r = [n for n in r if n not in removed_nodes]
+        if len(new_r) > 2: # Giữ lại nếu không chỉ còn depot
+            new_routes.append(new_r)
+    return new_routes, removed_nodes
+
+def worst_removal(routes, pd, dist, q=1):
+    # Tìm cặp có khoảng cách giữa P và D lớn nhất để xóa
+    sorted_pairs = sorted(pd.items(), key=lambda x: dist[x[0]][x[1]], reverse=True)
+    selected_pairs = sorted_pairs[:q]
+    
+    removed_nodes = []
+    for p, d in selected_pairs:
+        removed_nodes.extend([p, d])
+
+    new_routes = []
+    for r in routes:
+        new_r = [n for n in r if n not in removed_nodes]
+        if len(new_r) > 2:
+            new_routes.append(new_r)
+    return new_routes, removed_nodes
+
+# =========================
+# REPAIR METHODS
+# =========================
+def greedy_insert(routes, removed, dist, nodes, pd):
+    pickups = [n for n in removed if n in pd]
+    for p in pickups:
+        d = pd[p]
+        best_cost_inc = float('inf')
+        best_pos = None # (route_idx, p_idx, d_idx)
+
+        for r_idx, r in enumerate(routes):
+            for i in range(1, len(r)): # chèn p
+                for j in range(i + 1, len(r) + 1): # chèn d (phải sau p)
+                    temp_r = r[:i] + [p] + r[i:j] + [d] + r[j:]
+                    cost = get_cost(temp_r, dist, nodes, pd)
+                    if cost < float('inf'):
+                        inc = cost - get_cost(r, dist, nodes, pd)
+                        if inc < best_cost_inc:
+                            best_cost_inc = inc
+                            best_pos = (r_idx, i, j)
+        
+        if best_pos:
+            r_idx, i, j = best_pos
+            routes[r_idx] = routes[r_idx][:i] + [p] + routes[r_idx][i:j] + [d] + routes[r_idx][j:]
+        else:
+            routes.append([0, p, d, 0])
+    return routes
+
+# =========================
+# MAIN ALNS
+# =========================
+def main():
+    nodes, dist, pd = create_random_rpdptw(n_pairs=8)
+    
+    # Khởi tạo: mỗi cặp 1 xe
+    current_routes = [[0, p, d, 0] for p, d in pd.items()]
+    
+    def total_cost(rts):
+        return sum(get_cost(r, dist, nodes, pd) for r in rts)
+
+    best_routes = copy.deepcopy(current_routes)
+    best_cost = total_cost(best_routes)
+    current_cost = best_cost
+
+    # Parameters
+    w_d, w_r = [1.0, 1.0], [1.0, 1.0]
+    score_d, score_r = [0, 0], [0, 0]
+    count_d, count_r = [0, 0], [0, 0]
+    r_factor = 0.1
+    scores = [10, 5, 2] # New best, Improve current, Accept worse
+    T = 100
+
+    for it in range(401):
+        d_idx = random.choices(range(2), weights=w_d)[0]
+        r_idx = random.choices(range(2), weights=w_r)[0]
+
+        # Destroy & Repair
+        temp_routes, removed = (random_removal(copy.deepcopy(current_routes), pd) if d_idx == 0 
+                                else worst_removal(copy.deepcopy(current_routes), pd, dist))
+        
+        # Ở đây đơn giản hóa: cả 2 repair đều dùng greedy_insert để demo 
+        # (Bạn có thể thêm hàm regret_insert vào list repair_methods)
+        temp_routes = greedy_insert(temp_routes, removed, dist, nodes, pd)
+        new_cost = total_cost(temp_routes)
+
+        # Update scores
+        s_idx = 2
+        if new_cost < best_cost:
+            best_routes = copy.deepcopy(temp_routes)
+            best_cost = new_cost
+            s_idx = 0
+        elif new_cost < current_cost:
+            s_idx = 1
+        
+        score_d[d_idx] += scores[s_idx]
+        score_r[r_idx] += scores[s_idx]
+        count_d[d_idx] += 1
+        count_r[r_idx] += 1
+
+        # Simulated Annealing Acceptance
+        if new_cost < current_cost or random.random() < math.exp(-(new_cost - current_cost) / max(T, 1e-3)):
+            current_routes = temp_routes
+            current_cost = new_cost
+
+        T *= 0.99 # Cooling
+
+        # Adaptive weight update
+        if it % 50 == 0 and it > 0:
+            for i in range(2):
+                if count_d[i] > 0: w_d[i] = (1-r_factor)*w_d[i] + r_factor*(score_d[i]/count_d[i])
+                if count_r[i] > 0: w_r[i] = (1-r_factor)*w_r[i] + r_factor*(score_r[i]/count_r[i])
+            print(f"Iter {it} | Best Cost: {best_cost:.2f} | T: {T:.2f}")
+
+    print("\n===== FINAL RESULT =====")
+    print(f"Best cost: {best_cost:.2f}")
+    
+    # Plotting
+    plt.figure(figsize=(10, 7))
+    for r in best_routes:
+        x = [nodes[i].x for i in r]
+        y = [nodes[i].y for i in r]
+        plt.plot(x, y, marker='o', linewidth=2)
+    
+    for n in nodes:
+        color = 'red' if 'P' in n.name else 'blue' if 'D' in n.name else 'green'
+        plt.scatter(n.x, n.y, c=color, s=100, zorder=5)
+        plt.text(n.x+1, n.y+1, n.name, fontsize=9)
+
+    plt.title(f"ALNS RPDPTW Solution (Cost: {best_cost:.2f})")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.show()
+
+if __name__ == "__main__":
+    main()
