@@ -1,0 +1,219 @@
+import math
+import random
+import time
+import matplotlib.pyplot as plt
+
+# =========================
+# Node class
+# =========================
+class Node:
+    def __init__(self, id, x, y, demand=0, ready=0, due=1000, service=0):
+        self.id = id
+        self.x = x
+        self.y = y
+        self.demand = demand
+        self.ready = ready
+        self.due = due
+        self.service = service
+
+# =========================
+# READ SOLOMON
+# =========================
+def read_solomon(file_path):
+    nodes = {}
+
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+
+    start = False
+    for line in lines:
+        if "CUSTOMER" in line:
+            start = True
+            continue
+
+        if start:
+            parts = line.strip().split()
+
+            # ❌ bỏ dòng header hoặc dòng rác
+            if len(parts) < 7:
+                continue
+            if not parts[0].isdigit():
+                continue
+
+            id = int(parts[0])
+            x = float(parts[1])
+            y = float(parts[2])
+            demand = float(parts[3])
+            ready = float(parts[4])
+            due = float(parts[5])
+            service = float(parts[6])
+
+            nodes[id] = Node(id, x, y, demand, ready, due, service)
+
+    return nodes
+
+# =========================
+# Distance
+# =========================
+def distance(a, b):
+    return math.hypot(a.x - b.x, a.y - b.y)
+
+# =========================
+# Cost
+# =========================
+def route_cost(route, nodes):
+    return sum(distance(nodes[route[i]], nodes[route[i+1]]) for i in range(len(route)-1))
+
+# =========================
+# Destroy
+# =========================
+def destroy(route, remove_count=3):
+    route = route.copy()
+    removed = []
+
+    for _ in range(remove_count):
+        if len(route) <= 2:
+            break
+        idx = random.randint(1, len(route)-2)
+        removed.append(route.pop(idx))
+
+    return route, removed
+
+# =========================
+# Repair
+# =========================
+def repair(route, removed, nodes):
+    for node in removed:
+        best_cost = float('inf')
+        best_pos = 1
+
+        for i in range(1, len(route)):
+            temp = route[:i] + [node] + route[i:]
+            cost = route_cost(temp, nodes)
+            if cost < best_cost:
+                best_cost = cost
+                best_pos = i
+
+        route.insert(best_pos, node)
+
+    return route
+
+# =========================
+# ALNS
+# =========================
+def alns(nodes, iterations=200):
+    customers = list(nodes.keys())
+
+    depot = min(nodes.keys())
+    customers.remove(depot)
+
+    route = [depot] + customers + [depot]
+
+    best_route = route.copy()
+    best_cost = route_cost(route, nodes)
+
+    history = []
+
+    for _ in range(iterations):
+        new_route, removed = destroy(route)
+        new_route = repair(new_route, removed, nodes)
+
+        new_cost = route_cost(new_route, nodes)
+
+        if new_cost < best_cost:
+            best_cost = new_cost
+            best_route = new_route
+
+        route = new_route
+        history.append(best_cost)
+
+    return best_route, best_cost, history
+
+# =========================
+# Plot route
+# =========================
+def plot_route(nodes, route):
+    x = [nodes[i].x for i in route]
+    y = [nodes[i].y for i in route]
+
+    plt.figure()
+    plt.plot(x, y, marker='o')
+
+    for i in route:
+        plt.text(nodes[i].x, nodes[i].y, str(i), fontsize=8)
+
+    plt.title("ALNS Route (C101)")
+    plt.grid()
+    plt.show()
+#=====================================================================
+def run_experiments_on_file(file_path):
+    results = []
+
+    # test với số lượng khách khác nhau
+    for n in [5, 10, 15, 20]:
+        total_cost = 0
+        best_cost = float('inf')
+        total_time = 0
+        runs = 5
+
+        for _ in range(runs):
+            nodes = read_solomon(file_path)
+
+            # lấy n khách đầu
+            selected_ids = sorted(nodes.keys())[:n]
+            sub_nodes = {i: nodes[i] for i in selected_ids}
+
+            start = time.time()
+            route, cost, _ = alns(sub_nodes, iterations=200)
+            end = time.time()
+
+            total_cost += cost
+            total_time += (end - start)
+
+            if cost < best_cost:
+                best_cost = cost
+
+        avg_cost = total_cost / runs
+        avg_time = total_time / runs
+
+        results.append((n, runs, round(best_cost,2), round(avg_cost,2), round(avg_time,4)))
+
+    return results
+#===================================================
+def print_table(results):
+    print("\n=== TABLE: ALNS PERFORMANCE ===")
+    print(f"{'Customers':<10} {'Runs':<5} {'Best':<10} {'Avg':<10} {'Time(s)':<10}")
+
+    for r in results:
+        print(f"{r[0]:<10} {r[1]:<5} {r[2]:<10} {r[3]:<10} {r[4]:<10}")
+#==============================
+        
+# =========================
+# Plot convergence
+# =========================
+def plot_history(history):
+    plt.figure()
+    plt.plot(history)
+    plt.title("ALNS Convergence")
+    plt.xlabel("Iteration")
+    plt.ylabel("Cost")
+    plt.grid()
+    plt.show()
+
+# =========================
+# MAIN
+# =========================
+if __name__ == "__main__":
+    nodes = read_solomon("c101_standard.txt")
+
+    route, cost, history = alns(nodes)
+
+    print("Best route:", route)
+    print("Best cost:", cost)
+
+    plot_route(nodes, route)
+    plot_history(history)
+
+    # chạy thống kê
+    results = run_experiments_on_file("c101_standard.txt")
+    print_table(results)
