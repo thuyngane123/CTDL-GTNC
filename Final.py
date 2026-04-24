@@ -1,6 +1,7 @@
 import math
 import random
 import time
+import os
 import matplotlib.pyplot as plt
 
 # =========================
@@ -34,7 +35,7 @@ def read_solomon(file_path):
         if start:
             parts = line.strip().split()
 
-            # ❌ bỏ dòng header hoặc dòng rác
+          
             if len(parts) < 7:
                 continue
             if not parts[0].isdigit():
@@ -201,19 +202,33 @@ def plot_history(history):
     plt.show()
 
 # =========================
+# =========================
 # MAIN
 # =========================
 if __name__ == "__main__":
-    nodes = read_solomon("c101_standard.txt")
+    # Lấy đường dẫn của thư mục chứa file Final.py này
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Kết hợp với tên file dữ liệu để tạo đường dẫn tuyệt đối
+    file_name = "c101_standard.txt"
+    data_path = os.path.join(current_dir, file_name)
 
-    route, cost, history = alns(nodes)
+    # Kiểm tra xem file có tồn tại không trước khi đọc
+    if not os.path.exists(data_path):
+        print(f" LỖI: Không tìm thấy file {file_name} tại {current_dir}")
+        print("Hãy đảm bảo bạn đã để file .txt cùng thư mục với file .py nhé!")
+    else:
+        # Đọc dữ liệu và chạy ALNS
+        nodes = read_solomon(data_path)
+        route, cost, history = alns(nodes)
 
-    print("Best route:", route)
-    print("Best cost:", cost)
+        print("Best route:", route)
+        print("Best cost:", cost)
 
-    plot_route(nodes, route)
-    plot_history(history)
+        plot_route(nodes, route)
+        plot_history(history)
 
-    # chạy thống kê
-    results = run_experiments_on_file("c101_standard.txt")
-    print_table(results)
+        # Chạy thống kê
+        print("\nĐang chạy thống kê thực nghiệm...")
+        results = run_experiments_on_file(data_path)
+        print_table(results)
